@@ -1,0 +1,245 @@
+  import time
+import random
+import pandas as pd
+from binance.client import Client
+from binance.enums import *
+import ta
+import yfinance as yf
+import datetime
+import ccxt
+import tkinter as tk
+from tkinter import ttk
+from threading import Thread
+from queue import Queue
+from ta.momentum import RSIIndicator
+import warnings
+
+warnings.filterwarnings('ignore', category=RuntimeWarning)
+
+
+# Initialize the exchange
+exchange = ccxt.binance({
+    'apiKey': 'yku1hu5dmJ5pVcZTckPNOkbB8uxjtDGVT6vokBHaBViLsZKcsLnaaxt4CB7fKcle',
+    'secret': 'Dm3ze5rkPftkEJ3HXonNIHenLkGHZj7ucBCv4wTw9iB2OD2Wg5IG3TWrnrxA7sO8',
+})
+
+# Set parameters
+
+# Define coins
+symbols = ['SHIB/USDT', 'LDO/USDT', 'XLM/USDT', 'FIL/USDT', 'STX/USDT', 'APE/USDT', 'LDO/USDT', 'MANA/USDT', 'GRT/USDT', 'NEAR/USDT', 'XMR/USDT', 'AVAX/USDT', 'AXS/USDT', 'BTTC/USDT', 'FTM/USDT', 'ICP/USDT', 'QNT/USDT', 'ARB/USDT', 'BTC/USDT', 'ETH/USDT', 'GALA/USDT', 'TRX/USDT', 'FET/USDT', 'ATOM/USDT', 'LQTY/USDT', 'ADA/USDT', 'BNB/USDT', 'SOL/USDT', 'XRP/USDT', 'DOGE/USDT', 'DOT/USDT', 'UNI/USDT', 'BCH/USDT', 'LINK/USDT', 'LTC/USDT', 'MATIC/USDT', 'ALGO/USDT', 'EOS/USDT']
+fixed_usd_amount = 15
+rsi_timeperiod = 14
+rsi_threshold = 70
+timeframe = '5m'
+higher_tf_timeframe = '1d'
+
+
+
+def get_market_type(df):
+    # Calculate ADX
+    adx = ta.trend.ADXIndicator(df['high'], df['low'], df['close'], window=14)
+    df['adx'] = adx.adx()
+
+    # Calculate ATR
+    atr = ta.volatility.AverageTrueRange(df['high'], df['low'], df['close'], window=14)
+    df['atr'] = atr.average_true_range()
+
+    # Calculate the simple moving average (SMA) slope
+    sma = ta.trend.SMAIndicator(df['close'], window=14)
+    df['sma'] = sma.sma_indicator()
+    sma_slope = df['sma'][-1] - df['sma'][-2]
+
+    if df['adx'][-1] >= 25 and df['atr'][-1] >= 0.5 * df['close'][-1]:
+        return 'volatility'
+    elif df['adx'][-1] >= 25 and df['atr'][-1] < 0.5 * df['close'][-1] and sma_slope > 0:
+        return 'uptrend'
+    elif df['adx'][-1] >= 25 and df['atr'][-1] < 0.5 * df['close'][-1] and sma_slope < 0:
+        return 'downtrend'
+    else:
+        return 'sideways'
+        
+    print(f"Current market type for {symbol}: {market_type}")
+    
+
+def get_indicators(df, market_type, timeframe, symbol):
+    # Fetch historical price data for the higher timeframe
+    higher_tf_data = exchange.fetch_ohlcv(symbol, timeframe)
+    higher_tf_df = pd.DataFrame(higher_tf_data, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+    higher_tf_df['timestamp'] = pd.to_datetime(higher_tf_df['timestamp'], unit='ms')
+    higher_tf_df = higher_tf_df.set_index('timestamp')
+
+    # Calculate indicators for the higher timeframe
+    higher_tf_rsi = ta.momentum.RSIIndicator(higher_tf_df['close'], window=14).rsi()
+    higher_tf_ema_5 = ta.trend.EMAIndicator(higher_tf_df['close'], window=5).ema_indicator()
+
+    # Calculate indicators for the lower timeframe
+    rsi = ta.momentum.RSIIndicator(df['close'], window=7).rsi()
+    macd = ta.trend.MACD(df['close'], window_slow=16, window_fast=8, window_sign=5)
+    df['macd'] = macd.macd()
+    df['macd_signal'] = macd.macd_signal()
+    df['macd_histogram'] = macd.macd_diff()
+    ema_5 = ta.trend.EMAIndicator(df['close'], window=3).ema_indicator()
+    ema_13 = ta.trend.EMAIndicator(df['close'], window=8).ema_indicator()
+    bb = ta.volatility.BollingerBands(df['close'], window=14, window_dev=1.5)
+    upper_band = bb.bollinger_hband()
+    middle_band = bb.bollinger_mavg()
+    lower_band = bb.bollinger_lband()
+
+    return (rsi, df['macd'], df['macd_signal'], df['macd_histogram'], 
+            ema_5, ema_13, 
+            upper_band, middle_band, lower_band,
+            higher_tf_rsi, higher_tf_ema_5)
+
+
+def round_step_size(value, step_size):
+    return round(value / step_size) * step_size
+
+def check_conditions(df, rsi, macd, ema_5, ema_13, upper_band, middle_band, lower_band, market_type, higher_tf_rsi, higher_tf_ema_5, timeframe, symbol):
+    
+    # Return 'no action' if any of the indicators have missing values
+    if rsi.empty or macd.empty or ema_5.empty or ema_13.empty or upper_band.empty or middle_band.empty or lower_band.empty:
+        print("Missing indicator values. Skipping...")
+        return 'no action'
+
+    if market_type == 'volatile':
+        # Buy conditions for volatile market
+        rsi_buy_range = (30, 60)
+        macd_buy_condition = (macd.iloc[-1] > 0) & (macd.iloc[-1] > df['macd_signal'].iloc[-1])
+        ema_cross_condition = (ema_5.iloc[-1] > ema_13.iloc[-1]) & (df['close'].iloc[-1] < middle_band.iloc[-1])
+        bollinger_band_condition = df['close'].iloc[-1] < lower_band.iloc[-1]
+
+    elif market_type == 'uptrend':
+        # Buy conditions for uptrend market
+        rsi_buy_range = (50, 80)
+        macd_buy_condition = macd.iloc[-1] > df['macd_signal'].iloc[-1]
+        ema_cross_condition = (ema_5.iloc[-1] > ema_13.iloc[-1]) & (df['close'].iloc[-1] > middle_band.iloc[-1])
+        bollinger_band_condition = df['close'].iloc[-1] > lower_band.iloc[-1]
+
+    elif market_type == 'downtrend':
+        # Buy conditions for downtrend market
+        rsi_buy_range = (20, 40)
+        macd_buy_condition = macd.iloc[-1] < df['macd_signal'].iloc[-1]
+        ema_cross_condition = (ema_5.iloc[-1] < ema_13.iloc[-1]) & (df['close'].iloc[-1] < middle_band.iloc[-1])
+        bollinger_band_condition = df['close'].iloc[-1] < lower_band.iloc[-1]
+
+    elif market_type == 'sideways':
+        # Buy conditions for sideways market
+        rsi_buy_range = (30, 50)
+        macd_buy_condition = macd.iloc[-1] < df['macd_signal'].iloc[-1]
+        ema_cross_condition = (ema_5.iloc[-1] < ema_13.iloc[-1]) & (df['close'].iloc[-1] < middle_band.iloc[-1])
+        bollinger_band_condition = df['close'].iloc[-1] < lower_band.iloc[-1]
+
+    rsi_buy_condition = (rsi_buy_range[0] <= rsi.iloc[-1]) & (rsi.iloc[-1] <= rsi_buy_range[1])
+    
+    # Check buy conditions for higher timeframe confirmation
+    higher_tf_rsi_buy_range = (40, 60)
+    higher_tf_ema_cross_condition = (df['close'].iloc[-1] > higher_tf_ema_5.iloc[-1])
+
+    higher_tf_rsi_buy_condition = (higher_tf_rsi_buy_range[0] <= higher_tf_rsi.iloc[-1]) & (higher_tf_rsi.iloc[-1] <= higher_tf_rsi_buy_range[1])
+    higher_tf_buy_signal = higher_tf_rsi_buy_condition and higher_tf_ema_cross_condition
+
+    # Print buy conditions
+    print(f"Higher Timeframe Buy Signal: {higher_tf_buy_signal}, Lower Timeframe Buy Conditions: RSI: {rsi_buy_condition}, MACD: {macd_buy_condition}, EMA cross: {ema_cross_condition}, Bollinger Bands: {bollinger_band_condition}")
+
+    if higher_tf_buy_signal and rsi_buy_condition and macd_buy_condition and ema_cross_condition and bollinger_band_condition:
+        print("Buy conditions met!")
+        return 'buy'
+
+    return 'no action'
+
+
+# Define main loop
+def main():
+    print('Starting bot...')
+    entry_prices = {}
+    total_investments = {symbol: 0 for symbol in symbols}
+    MIN_ORDER_VALUE = 15
+    MAX_ORDER_VALUE = 20
+    take_profit_pct = 1  # Change this value according to your strategy
+    stop_loss_pct = 1  # Change this value according to your strategy
+
+    while True:
+        try:
+            balance = exchange.fetch_balance()
+            usdt_balance = balance['USDT']['free']
+            print(f"USDT Balance: {usdt_balance}")
+
+            for symbol in symbols:
+                print(f"Checking {symbol}...")
+
+                # Fetch the asset balance
+                asset_symbol, quote_symbol = symbol.split('/')
+                asset_balance = balance[asset_symbol]['free']
+                print(f"{symbol} Balance: {asset_balance} {asset_symbol}")
+
+                # Fetch historical price data
+                data = exchange.fetch_ohlcv(symbol, '3m')
+                df = pd.DataFrame(data, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+                df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+                df = df.set_index('timestamp')
+
+                # Check if there is enough data
+                if len(df) < 20:
+                    print(f"Not enough data for {symbol}. Skipping...")
+                    continue
+
+                # Determine the current market type
+                market_type = get_market_type(df)
+                print(f"{symbol} Market type: {market_type}")
+
+                ## Calculate indicators
+                rsi, macd, macd_signal, macd_histogram, ema_5, ema_13, upper_band, middle_band, lower_band, higher_tf_rsi, higher_tf_ema_5 = get_indicators(df, market_type, higher_tf_timeframe, symbol)
+
+                # Print indicators' values
+                print(f"{symbol} RSI: {rsi.iloc[-1]}")
+                print(f"{symbol} MACD: {macd.iloc[-1]}, MACD Signal: {macd_signal.iloc[-1]}, MACD Histogram: {macd_histogram.iloc[-1]}")
+                print(f"{symbol} EMA 5: {ema_5.iloc[-1]}, EMA 13: {ema_13.iloc[-1]}")
+                print(f"{symbol} Bollinger Bands: Upper: {upper_band.iloc[-1]}, Middle: {middle_band.iloc[-1]}, Lower: {lower_band.iloc[-1]}")
+
+                print(f"Checking buy signal for {symbol}...")  # Add this line
+                buy_signal = check_conditions(df, rsi, macd, ema_5, ema_13, upper_band, middle_band, lower_band, market_type, higher_tf_rsi, higher_tf_ema_5, higher_tf_timeframe, symbol)
+                print(f"{symbol} Buy signal: {buy_signal}")
+
+                if buy_signal == 'buy':
+                    print(f"Buy signal triggered for {symbol}. Current total investment: {total_investments[symbol]}")
+                    if MIN_ORDER_VALUE <= total_investments[symbol] < MAX_ORDER_VALUE:
+                        print(f"Total investment for {symbol} is between the minimum and maximum order value. Skipping buy...")
+                    elif total_investments[symbol] < MIN_ORDER_VALUE:
+                        amount = (MIN_ORDER_VALUE - total_investments[symbol]) / df['close'][-1]  # Calculate the amount of asset to buy to reach the minimum order value
+                        print(f"Attempting to buy {symbol} to reach minimum order value. Current price: {df['close'][-1]}, Calculated amount: {amount}")
+                        try:
+                            exchange.create_market_buy_order(symbol, amount=amount)
+                            entry_prices[symbol] = df['close'][-1]
+                            print(f"Bought {symbol} to reach minimum order value. Entry price: {entry_prices[symbol]}")
+
+                            # Update the total investment for the symbol
+                            total_investments[symbol] += MIN_ORDER_VALUE
+
+                        except Exception as e:
+                            print(f"Error placing market buy order for {symbol}: {e}")
+
+                # Check if sell conditions are met
+                if asset_balance > 0:
+                    current_price = df['close'][-1]
+                    initial_investment = total_investments[symbol]
+                    if initial_investment > 0:
+                        profit_pct = ((current_price - entry_prices[symbol]) / entry_prices[symbol]) * 100
+                        if profit_pct >= take_profit_pct or profit_pct <= -stop_loss_pct:
+                            print(f"Sell signal triggered for {symbol}. Profit percentage: {profit_pct}")
+                            try:
+                                exchange.create_market_sell_order(symbol, asset_balance)
+                                print(f"Sold {symbol}. Current price: {current_price}")
+
+                                # Reset total investment for the symbol
+                                total_investments[symbol] = 0
+                            except Exception as e:
+                                print(f"Error placing market sell order for {symbol}: {e}")
+                
+            print("Waiting before next loop...")
+            time.sleep(5 * 60)  # Wait for 3 minutes before the next iteration
+
+        except Exception as e:
+            print(f'Error: {e}')
+
+if __name__ == "__main__":
+    main()

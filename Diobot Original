@@ -19,8 +19,8 @@ warnings.filterwarnings('ignore', category=RuntimeWarning)
 
 # Initialize the exchange
 exchange = ccxt.binance({
-    'apiKey': 'yku1hu5dmJ5pVcZTckPNOkbB8uxjtDGVT6vokBHaBViLsZKcsLnaaxt4CB7fKcle',
-    'secret': 'Dm3ze5rkPftkEJ3HXonNIHenLkGHZj7ucBCv4wTw9iB2OD2Wg5IG3TWrnrxA7sO8',
+    'apiKey': '',
+    'secret': '',
 })
 
 # Set parameters

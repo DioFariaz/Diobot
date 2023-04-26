@@ -1,4 +1,4 @@
-  import time
+import time
 import random
 import pandas as pd
 from binance.client import Client
@@ -26,7 +26,7 @@ exchange = ccxt.binance({
 # Set parameters
 
 # Define coins
-symbols = ['SHIB/USDT', 'LDO/USDT', 'XLM/USDT', 'FIL/USDT', 'STX/USDT', 'APE/USDT', 'LDO/USDT', 'MANA/USDT', 'GRT/USDT', 'NEAR/USDT', 'XMR/USDT', 'AVAX/USDT', 'AXS/USDT', 'BTTC/USDT', 'FTM/USDT', 'ICP/USDT', 'QNT/USDT', 'ARB/USDT', 'BTC/USDT', 'ETH/USDT', 'GALA/USDT', 'TRX/USDT', 'FET/USDT', 'ATOM/USDT', 'LQTY/USDT', 'ADA/USDT', 'BNB/USDT', 'SOL/USDT', 'XRP/USDT', 'DOGE/USDT', 'DOT/USDT', 'UNI/USDT', 'BCH/USDT', 'LINK/USDT', 'LTC/USDT', 'MATIC/USDT', 'ALGO/USDT', 'EOS/USDT']
+symbols = ['SHIB/USDT', 'LDO/USDT', 'XLM/USDT', 'FIL/USDT', 'STX/USDT', 'APE/USDT', 'MANA/USDT', 'GRT/USDT', 'NEAR/USDT', 'XMR/USDT', 'AVAX/USDT', 'AXS/USDT', 'BTTC/USDT', 'FTM/USDT', 'ICP/USDT', 'QNT/USDT', 'ARB/USDT', 'BTC/USDT', 'ETH/USDT', 'GALA/USDT', 'TRX/USDT', 'FET/USDT', 'ATOM/USDT', 'LQTY/USDT', 'ADA/USDT', 'BNB/USDT', 'SOL/USDT', 'XRP/USDT', 'DOGE/USDT', 'DOT/USDT', 'UNI/USDT', 'BCH/USDT', 'LINK/USDT', 'LTC/USDT', 'MATIC/USDT', 'ALGO/USDT', 'EOS/USDT']
 fixed_usd_amount = 15
 rsi_timeperiod = 14
 rsi_threshold = 70
@@ -173,7 +173,7 @@ def main():
                 print(f"{symbol} Balance: {asset_balance} {asset_symbol}")
 
                 # Fetch historical price data
-                data = exchange.fetch_ohlcv(symbol, '3m')
+                data = exchange.fetch_ohlcv(symbol, '5m')
                 df = pd.DataFrame(data, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
                 df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
                 df = df.set_index('timestamp')
@@ -242,4 +242,4 @@ def main():
             print(f'Error: {e}')
 
 if __name__ == "__main__":
-    main()
+    main()    
